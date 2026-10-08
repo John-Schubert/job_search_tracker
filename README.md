@@ -112,3 +112,7 @@ network safeguards. It was built with Claude Code.
 The repository contains code and fictional examples only. `data/` is ignored
 by git, and a pre-commit hook in the working copy refuses to commit anything
 from it.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
