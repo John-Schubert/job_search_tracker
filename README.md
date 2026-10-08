@@ -37,6 +37,7 @@ same list.
 ![Log page with example data](docs/log.png)
 
 The screenshots use the fictional rows in `examples/seed.example.json`.
+More in the [screenshot gallery](https://john-schubert.github.io/job_search_tracker_gallery/).
 
 ## Running it
 
@@ -49,7 +50,15 @@ PORT=8080 python3 server.py
 Then open http://localhost:8080/. The database is created in `data/` on the
 first start.
 
-To begin with sample rows, copy the example file before the first start:
+To look around without creating a database, run the demo. It serves a
+throwaway copy with fictional applications and log entries on port 8767:
+
+```bash
+python3 examples/demo.py
+```
+
+To begin your own tracker with sample rows, copy the example file before the
+first start:
 
 ```bash
 mkdir -p data && cp examples/seed.example.json data/seed.json

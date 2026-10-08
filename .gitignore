@@ -8,3 +8,4 @@ CLAUDE.md
 __pycache__/
 *.pyc
 job-tracker.service
+screenshots/
