@@ -1,0 +1,10 @@
+# Everything personal stays out of the repository.
+# data/ holds the live database, its daily backups and the real starting rows.
+data/
+# The original single-file tracker, which has real applications embedded in it.
+original/
+# Local working notes (network addresses, personal context).
+CLAUDE.md
+__pycache__/
+*.pyc
+job-tracker.service

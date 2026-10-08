@@ -1,0 +1,530 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Job Search Tracker</title>
+<style>
+:root{
+  --bg:#f6f7f9; --panel:#ffffff; --text:#1d2330; --muted:#5d6678; --line:#dde1e8;
+  --accent:#1f5fbf; --accent-text:#ffffff;
+  --warn:#fff3d6; --bad:#fde4e2; --chip:#e9edf4;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#14171d; --panel:#1c2029; --text:#e6e9ef; --muted:#9aa3b5; --line:#2e3441;
+    --accent:#6aa3ff; --accent-text:#0d1220;
+    --warn:#3a3118; --bad:#3d1f1d; --chip:#272d3a;
+  }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+header{padding:16px 16px 8px}
+h1{margin:0 0 4px;font-size:20px}
+.sub{color:var(--muted);font-size:13px}
+.titlebar{display:flex;flex-wrap:wrap;align-items:center;gap:6px 18px;margin:0 0 4px}
+.titlebar h1{margin:0}
+.nav{display:flex;gap:4px;margin:0}
+.nav a{padding:3px 12px;border-radius:6px;text-decoration:none;color:var(--accent);font-weight:600}
+.nav a:hover{background:var(--chip)}
+.nav a.cur{background:var(--accent);color:var(--accent-text)}
+.toolbar{display:flex;flex-wrap:wrap;gap:8px;padding:8px 16px;align-items:center}
+.toolbar input[type=search],.toolbar select{padding:7px 9px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--text);font:inherit}
+.toolbar input[type=search]{min-width:200px}
+button{padding:7px 12px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--text);font:inherit;cursor:pointer}
+button:hover{border-color:var(--accent)}
+button.primary{background:var(--accent);color:var(--accent-text);border-color:var(--accent)}
+.spacer{flex:1}
+.chips{display:flex;flex-wrap:wrap;gap:6px;padding:0 16px 8px}
+.chip{background:var(--chip);border-radius:999px;padding:3px 10px;font-size:12px}
+.chip.alert{background:var(--bad);font-weight:600}
+.wrap{margin:0 16px 24px;overflow:auto;border:1px solid var(--line);border-radius:8px;background:var(--panel);max-height:calc(100vh - 190px)}
+table{border-collapse:collapse;width:100%;min-width:1100px}
+th{position:sticky;top:0;background:var(--panel);text-align:left;padding:8px;border-bottom:2px solid var(--line);cursor:pointer;white-space:nowrap;user-select:none;z-index:1}
+th .arrow{color:var(--accent);margin-left:4px}
+th.nosort{cursor:default}
+td{padding:2px 4px;border-bottom:1px solid var(--line);vertical-align:middle}
+td input,td select{width:100%;padding:6px;border:1px solid transparent;border-radius:4px;background:transparent;color:var(--text);font:inherit}
+td input:hover,td select:hover{border-color:var(--line)}
+td input:focus,td select:focus{outline:none;border-color:var(--accent);background:var(--panel)}
+td.c-company{min-width:150px} td.c-role{min-width:240px} td.c-status{min-width:150px}
+td.c-applied,td.c-followup{min-width:135px} td.c-contact{min-width:150px}
+td.c-next{min-width:230px} td.c-notes{min-width:260px} td.c-del{width:44px;text-align:center}
+tr.due{background:var(--warn)}
+tr.overdue{background:var(--bad)}
+tr.closed td input,tr.closed td select{opacity:.55}
+.del{padding:2px 8px;color:var(--muted)}
+.note{padding:0 16px 20px;color:var(--muted);font-size:12px}
+.warnbox{margin:0 16px 8px;padding:8px 12px;background:var(--warn);border-radius:6px;font-size:13px;display:none}
+.hist{margin:0 16px 12px;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
+.hist summary{padding:8px 12px;cursor:pointer;font-weight:600}
+.histlist{max-height:320px;overflow:auto;border-top:1px solid var(--line)}
+.hrow{display:flex;gap:12px;padding:6px 12px;border-bottom:1px solid var(--line);font-size:13px;align-items:baseline}
+.hrow:last-child{border-bottom:0}
+.hrow .when{color:var(--muted);white-space:nowrap;min-width:120px}
+.hrow .who{font-weight:600;min-width:180px;max-width:320px}
+.hrow .what{flex:1;overflow-wrap:anywhere}
+.hrow .old{color:var(--muted);text-decoration:line-through}
+.hrow button{padding:2px 8px;font-size:12px}
+.hempty{padding:10px 12px;color:var(--muted);font-size:13px}
+</style>
+</head>
+<body>
+<header>
+  <div class="titlebar">
+    <h1>Job Search Tracker</h1>
+    <nav class="nav">
+      <a href="/" class="cur">Tracker</a>
+      <a href="/log">Log</a>
+    </nav>
+  </div>
+  <div class="sub">Click a column heading to sort. Edit any cell directly. Changes save automatically to the Pi, so every device on your network sees the same list. <span id="saved"></span></div>
+</header>
+
+<div class="warnbox" id="warn">Can't reach the tracker server, so your latest changes are not saved yet. They will be sent again when it answers.</div>
+
+<div class="toolbar">
+  <button class="primary" id="add">+ Add row</button>
+  <input type="search" id="search" placeholder="Search all columns">
+  <select id="statusFilter" aria-label="Filter by status"></select>
+  <span class="spacer"></span>
+  <button id="csv">Export CSV</button>
+  <button id="json">Export JSON backup</button>
+  <button id="importBtn">Import JSON</button>
+  <input type="file" id="importFile" accept="application/json,.json" hidden>
+</div>
+
+<div class="chips" id="chips"></div>
+
+<div class="wrap">
+  <table>
+    <thead><tr id="headRow"></tr></thead>
+    <tbody id="body"></tbody>
+  </table>
+</div>
+
+<details class="hist" id="hist">
+  <summary>Recent changes</summary>
+  <div class="histlist" id="histList"></div>
+</details>
+
+<div class="note">Rows shaded amber have a follow-up due within 3 days. Rows shaded red are overdue. Offer, Rejected, Closed / filled, and Withdrawn rows are never highlighted. Data is stored on the Pi 5 and copied to a dated backup there once a day. Deleted rows can be restored from Recent changes.</div>
+
+<script>
+(function(){
+'use strict';
+
+var KEY = 'jobTracker.v1';
+var STATUSES = ['Researching','Preparing','Applied','Recruiter screen','Interviewing','Awaiting decision','Offer','Rejected','Closed / filled','Withdrawn'];
+var CLOSED = ['Offer','Rejected','Closed / filled','Withdrawn'];
+var COLS = [
+  {key:'company', label:'Company'},
+  {key:'role', label:'Role'},
+  {key:'status', label:'Status', type:'status'},
+  {key:'applied', label:'Applied', type:'date'},
+  {key:'contact', label:'Contact'},
+  {key:'next', label:'Next action'},
+  {key:'followup', label:'Follow-up', type:'date'},
+  {key:'notes', label:'Notes'}
+];
+
+var seq = 0;
+function newId(){ seq += 1; return 'r' + Date.now().toString(36) + seq.toString(36) + Math.random().toString(36).slice(2,5); }
+function mk(company, role, status, applied, contact, next, followup, notes){
+  return {id:newId(), company:company, role:role, status:status, applied:applied, contact:contact, next:next, followup:followup, notes:notes};
+}
+
+function clean(r){
+  var o = {id: (r && r.id) ? String(r.id) : newId()};
+  COLS.forEach(function(c){ o[c.key] = (r && r[c.key] != null) ? String(r[c.key]) : ''; });
+  if (STATUSES.indexOf(o.status) === -1) o.status = 'Researching';
+  return o;
+}
+
+var rows = [];
+var sort = {key:'followup', dir:1};
+var pinnedId = null;
+var timers = {};    // row id -> timer for a save that is waiting for typing to pause
+var unsaved = {};   // row id -> row whose save failed and will be retried
+
+var els = {
+  body: document.getElementById('body'),
+  headRow: document.getElementById('headRow'),
+  search: document.getElementById('search'),
+  statusFilter: document.getElementById('statusFilter'),
+  chips: document.getElementById('chips'),
+  saved: document.getElementById('saved'),
+  warn: document.getElementById('warn'),
+  hist: document.getElementById('hist'),
+  histList: document.getElementById('histList')
+};
+
+// The rows live in a database on the Pi; this page reads and writes them here.
+function api(method, path, body){
+  var opt = {method: method, headers: {}};
+  if (body !== undefined) {
+    opt.headers['Content-Type'] = 'application/json';
+    opt.body = JSON.stringify(body);
+    opt.keepalive = true;   // lets a save finish if the tab is closed right after typing
+  }
+  return fetch(path, opt).then(function(res){
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return res.json();
+  });
+}
+function reachable(yes){
+  els.warn.style.display = yes ? 'none' : 'block';
+  if (!yes) els.saved.textContent = '';
+}
+function savedNow(){
+  reachable(true);
+  var d = new Date();
+  els.saved.textContent = 'Saved ' + d.toLocaleTimeString([], {hour:'numeric', minute:'2-digit'}) + '.';
+  loadHistory();
+}
+function sendRow(r){
+  clearTimeout(timers[r.id]);
+  delete timers[r.id];
+  return api('PUT', '/api/jobs/' + encodeURIComponent(r.id), r).then(function(){
+    delete unsaved[r.id];
+    savedNow();
+  }, function(){
+    unsaved[r.id] = r;
+    reachable(false);
+  });
+}
+function saveRow(r, now){
+  clearTimeout(timers[r.id]);
+  if (now) return sendRow(r);
+  timers[r.id] = setTimeout(function(){ sendRow(r); }, 600);
+}
+function flush(){
+  Object.keys(timers).forEach(function(id){
+    var r = rows.filter(function(x){ return x.id === id; })[0];
+    if (r) sendRow(r); else { clearTimeout(timers[id]); delete timers[id]; }
+  });
+}
+// True while there is local work the server does not have yet, or a cell is being edited.
+function busy(){
+  if (Object.keys(timers).length || Object.keys(unsaved).length) return true;
+  var a = document.activeElement;
+  return !!(a && els.body.contains(a));
+}
+function canon(list){
+  return JSON.stringify(list.slice().sort(function(a, b){ return a.id < b.id ? -1 : a.id > b.id ? 1 : 0; }));
+}
+function refresh(force){
+  return api('GET', '/api/jobs').then(function(data){
+    reachable(true);
+    var list = (data.rows || []).map(clean);
+    if (!force && (busy() || canon(list) === canon(rows))) return;
+    rows = list;
+    render();
+    loadHistory();
+  }, function(){ reachable(false); });
+}
+// Picks up edits made on another device, and retries saves that failed.
+function poll(){
+  var ids = Object.keys(unsaved);
+  if (ids.length) { ids.forEach(function(id){ sendRow(unsaved[id]); }); return; }
+  refresh(false);
+}
+
+function when(ts){
+  var d = new Date(ts * 1000), now = new Date();
+  var t = d.toLocaleTimeString([], {hour:'numeric', minute:'2-digit'});
+  if (d.toDateString() === now.toDateString()) return 'Today ' + t;
+  return d.toLocaleDateString([], {month:'short', day:'numeric'}) + ' ' + t;
+}
+function loadHistory(){
+  if (!els.hist.open) return;
+  api('GET', '/api/history?limit=80').then(function(data){
+    els.histList.innerHTML = '';
+    var list = data.history || [];
+    if (!list.length) {
+      var e = document.createElement('div');
+      e.className = 'hempty';
+      e.textContent = 'No changes recorded yet.';
+      els.histList.appendChild(e);
+    }
+    list.forEach(function(h){
+      var row = document.createElement('div');
+      row.className = 'hrow';
+      function part(cls, text){
+        var s = document.createElement('span');
+        s.className = cls;
+        s.textContent = text;
+        row.appendChild(s);
+        return s;
+      }
+      part('when', when(h.ts)).title = new Date(h.ts * 1000).toString();
+      part('who', (h.company || '(no company)') + (h.role ? ' – ' + h.role : '')).title = h.role || '';
+      var what = part('what', '');
+      if (h.action === 'changed') {
+        what.appendChild(document.createTextNode(h.field + ': '));
+        if (h.old) {
+          var o = document.createElement('span');
+          o.className = 'old';
+          o.textContent = h.old;
+          what.appendChild(o);
+          what.appendChild(document.createTextNode(' → '));
+        }
+        what.appendChild(document.createTextNode(h.new || '(cleared)'));
+      } else {
+        what.textContent = {added:'Row added', deleted:'Row deleted', restored:'Row restored',
+                            imported:'Loaded from the original tracker file'}[h.action] || h.action;
+      }
+      if (h.action === 'deleted' && h.deleted) {
+        var b = document.createElement('button');
+        b.textContent = 'Restore';
+        b.title = 'Put this row back in the tracker exactly as it was when it was deleted.';
+        b.addEventListener('click', function(){
+          api('POST', '/api/jobs/' + encodeURIComponent(h.job_id) + '/restore', {}).then(function(){
+            return refresh(true);
+          }, function(){ reachable(false); });
+        });
+        row.appendChild(b);
+      }
+      els.histList.appendChild(row);
+    });
+  }, function(){});
+}
+
+function pad(n){ return n < 10 ? '0' + n : '' + n; }
+function dstr(d){ return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()); }
+function rowClass(r){
+  if (CLOSED.indexOf(r.status) !== -1) return 'closed';
+  if (!r.followup) return '';
+  var now = new Date();
+  var today = dstr(now);
+  var soon = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 3);
+  if (r.followup < today) return 'overdue';
+  if (r.followup <= dstr(soon)) return 'due';
+  return '';
+}
+
+function cmp(a, b){
+  var k = sort.key, x = a[k] || '', y = b[k] || '';
+  if (k === 'status') { x = STATUSES.indexOf(x); y = STATUSES.indexOf(y); }
+  else if (k === 'applied' || k === 'followup') {
+    if (!x && !y) return 0;
+    if (!x) return 1;
+    if (!y) return -1;
+  } else { x = String(x).toLowerCase(); y = String(y).toLowerCase(); }
+  return (x < y ? -1 : x > y ? 1 : 0) * sort.dir;
+}
+
+function buildHead(){
+  els.headRow.innerHTML = '';
+  COLS.forEach(function(c){
+    var th = document.createElement('th');
+    th.textContent = c.label;
+    var ar = document.createElement('span');
+    ar.className = 'arrow';
+    if (sort.key === c.key) ar.textContent = sort.dir === 1 ? '\u25B2' : '\u25BC';
+    th.appendChild(ar);
+    th.addEventListener('click', function(){
+      if (sort.key === c.key) sort.dir = -sort.dir; else { sort.key = c.key; sort.dir = 1; }
+      pinnedId = null;
+      buildHead();
+      render();
+    });
+    els.headRow.appendChild(th);
+  });
+  var del = document.createElement('th');
+  del.className = 'nosort';
+  els.headRow.appendChild(del);
+}
+
+function buildFilter(){
+  els.statusFilter.innerHTML = '';
+  var all = document.createElement('option');
+  all.value = ''; all.textContent = 'All statuses';
+  els.statusFilter.appendChild(all);
+  STATUSES.forEach(function(s){
+    var o = document.createElement('option');
+    o.value = s; o.textContent = s;
+    els.statusFilter.appendChild(o);
+  });
+}
+
+function makeRow(r){
+  var tr = document.createElement('tr');
+  tr.className = rowClass(r);
+  COLS.forEach(function(c){
+    var td = document.createElement('td');
+    td.className = 'c-' + c.key;
+    var input;
+    if (c.type === 'status') {
+      input = document.createElement('select');
+      STATUSES.forEach(function(s){
+        var o = document.createElement('option');
+        o.value = s; o.textContent = s;
+        input.appendChild(o);
+      });
+      input.value = r.status;
+    } else {
+      input = document.createElement('input');
+      input.type = c.type === 'date' ? 'date' : 'text';
+      input.value = r[c.key] || '';
+      if (c.type !== 'date') input.title = r[c.key] || '';
+    }
+    input.setAttribute('aria-label', c.label);
+    var evt = c.type === 'status' ? 'change' : 'input';
+    input.addEventListener(evt, function(){
+      r[c.key] = input.value;
+      if (c.type !== 'date' && c.type !== 'status') input.title = input.value;
+      tr.className = rowClass(r);
+      saveRow(r, c.type === 'status' || c.type === 'date');
+      summary();
+    });
+    td.appendChild(input);
+    tr.appendChild(td);
+  });
+  var tdd = document.createElement('td');
+  tdd.className = 'c-del';
+  var b = document.createElement('button');
+  b.className = 'del';
+  b.textContent = '\u2715';
+  b.title = 'Delete this row';
+  b.setAttribute('aria-label', 'Delete row');
+  b.addEventListener('click', function(){
+    var name = (r.company || 'this row') + (r.role ? ' - ' + r.role : '');
+    if (window.confirm('Delete ' + name + '?')) {
+      rows = rows.filter(function(x){ return x.id !== r.id; });
+      clearTimeout(timers[r.id]);
+      delete timers[r.id];
+      delete unsaved[r.id];
+      render();
+      api('DELETE', '/api/jobs/' + encodeURIComponent(r.id)).then(savedNow, function(){
+        reachable(false);
+        refresh(true);
+      });
+    }
+  });
+  tdd.appendChild(b);
+  tr.appendChild(tdd);
+  return tr;
+}
+
+function summary(){
+  var counts = {}, due = 0;
+  rows.forEach(function(r){
+    counts[r.status] = (counts[r.status] || 0) + 1;
+    var c = rowClass(r);
+    if (c === 'due' || c === 'overdue') due += 1;
+  });
+  els.chips.innerHTML = '';
+  function chip(text, cls){
+    var s = document.createElement('span');
+    s.className = 'chip' + (cls ? ' ' + cls : '');
+    s.textContent = text;
+    els.chips.appendChild(s);
+  }
+  chip(rows.length + ' total');
+  STATUSES.forEach(function(s){ if (counts[s]) chip(s + ': ' + counts[s]); });
+  if (due) chip('Follow-ups due or overdue: ' + due, 'alert');
+}
+
+function render(){
+  var q = els.search.value.trim().toLowerCase();
+  var sf = els.statusFilter.value;
+  var list = rows.filter(function(r){
+    if (sf && r.status !== sf) return false;
+    if (!q) return true;
+    return COLS.some(function(c){ return String(r[c.key] || '').toLowerCase().indexOf(q) !== -1; });
+  });
+  list.sort(cmp);
+  if (pinnedId) {
+    var i = list.findIndex(function(r){ return r.id === pinnedId; });
+    if (i > 0) list.unshift(list.splice(i, 1)[0]);
+  }
+  els.body.innerHTML = '';
+  list.forEach(function(r){ els.body.appendChild(makeRow(r)); });
+  summary();
+}
+
+document.getElementById('add').addEventListener('click', function(){
+  var r = mk('', '', 'Researching', '', '', '', '', '');
+  rows.unshift(r);
+  els.search.value = '';
+  els.statusFilter.value = '';
+  pinnedId = r.id;
+  saveRow(r, true);
+  render();
+  var first = els.body.querySelector('input');
+  if (first) first.focus();
+});
+els.search.addEventListener('input', function(){ pinnedId = null; render(); });
+els.statusFilter.addEventListener('change', function(){ pinnedId = null; render(); });
+
+function download(name, text, type){
+  var blob = new Blob([text], {type:type});
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(function(){ URL.revokeObjectURL(a.href); }, 1000);
+}
+function stamp(){ return dstr(new Date()); }
+function csvCell(v){
+  v = String(v == null ? '' : v);
+  return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+}
+
+document.getElementById('csv').addEventListener('click', function(){
+  var lines = [COLS.map(function(c){ return csvCell(c.label); }).join(',')];
+  rows.forEach(function(r){
+    lines.push(COLS.map(function(c){ return csvCell(r[c.key]); }).join(','));
+  });
+  download('job_tracker_' + stamp() + '.csv', lines.join('\r\n'), 'text/csv;charset=utf-8');
+});
+document.getElementById('json').addEventListener('click', function(){
+  download('job_tracker_backup_' + stamp() + '.json',
+    JSON.stringify({version:1, exported:new Date().toISOString(), rows:rows}, null, 2),
+    'application/json');
+});
+document.getElementById('importBtn').addEventListener('click', function(){
+  document.getElementById('importFile').click();
+});
+document.getElementById('importFile').addEventListener('change', function(ev){
+  var f = ev.target.files && ev.target.files[0];
+  if (!f) return;
+  var reader = new FileReader();
+  reader.onload = function(){
+    try {
+      var data = JSON.parse(reader.result);
+      var list = Array.isArray(data) ? data : data.rows;
+      if (!Array.isArray(list)) throw new Error('No rows found');
+      if (window.confirm('Replace the current ' + rows.length + ' rows with ' + list.length + ' rows from this file?')) {
+        var incoming = list.map(clean);
+        api('POST', '/api/import', {rows: incoming}).then(function(){
+          pinnedId = null;
+          timers = {};
+          unsaved = {};
+          savedNow();
+          return refresh(true);
+        }, function(e){
+          window.alert('The import was not saved: ' + e.message);
+        });
+      }
+    } catch (e) {
+      window.alert('That file could not be imported: ' + e.message);
+    }
+    ev.target.value = '';
+  };
+  reader.readAsText(f);
+});
+
+buildHead();
+buildFilter();
+refresh(true);
+setInterval(poll, 20000);
+els.hist.addEventListener('toggle', loadHistory);
+window.addEventListener('pagehide', flush);
+})();
+</script>
+</body>
+</html>

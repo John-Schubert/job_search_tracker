@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "source": "Fictional example rows. Copy to data/seed.json before the first start to try the tracker with sample data.",
+  "rows": [
+    {"id": "ex01", "company": "Acme Robotics", "role": "Senior Systems Engineer (req 1042)", "status": "Interviewing", "applied": "2026-09-21", "contact": "Dana Reyes (recruiter); Sam Okafor (hiring manager)", "next": "Prepare for the panel interview", "followup": "2026-10-10", "notes": "Phone screen went well. Panel is four people, one hour."},
+    {"id": "ex02", "company": "Globex", "role": "Solutions Architect", "status": "Awaiting decision", "applied": "2026-09-08", "contact": "Priya Nair (recruiter)", "next": "Send a short status check if no word", "followup": "2026-10-06", "notes": "Final round done. They said one to two weeks."},
+    {"id": "ex03", "company": "Initech", "role": "Technical Program Manager", "status": "Applied", "applied": "2026-10-01", "contact": "", "next": "Check application status", "followup": "", "notes": "Remote, some travel."},
+    {"id": "ex04", "company": "Initech", "role": "Field Engineer", "status": "Applied", "applied": "2026-10-01", "contact": "", "next": "Check application status", "followup": "", "notes": ""},
+    {"id": "ex05", "company": "Hooli", "role": "Product Manager, Developer Tools", "status": "Rejected", "applied": "2026-09-14", "contact": "", "next": "", "followup": "", "notes": "Rejected by email two days later."},
+    {"id": "ex06", "company": "Umbrella Networks", "role": "Sales Engineer, Federal", "status": "Closed / filled", "applied": "2026-08-30", "contact": "Lee Park (referral)", "next": "", "followup": "", "notes": "Position was filled before interviews started."},
+    {"id": "ex07", "company": "Stark Industries", "role": "Test Engineer, Avionics", "status": "Preparing", "applied": "", "contact": "", "next": "Tailor the resume and apply", "followup": "2026-10-12", "notes": "Posting closes at the end of the month."}
+  ]
+}

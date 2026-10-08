@@ -1,0 +1,23 @@
+[Unit]
+Description=Job Search Tracker (web page + SQLite, port 80, home network only)
+After=network.target
+
+[Service]
+User=YOUR_USER
+WorkingDirectory=/home/YOUR_USER/job_tracker
+Environment=PORT=80
+ExecStart=/usr/bin/python3 /home/YOUR_USER/job_tracker/server.py
+Restart=on-failure
+RestartSec=5
+
+# Port 80 without running as root; everything else locked down.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/YOUR_USER/job_tracker/data
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
