@@ -1,11 +1,42 @@
-# Everything personal stays out of the repository.
+# Allowlist: ignore everything, then allow only known-safe files.
+# The rules behind this are in CLAUDE.md.
+*
+!*/
+!*.py
+!*.html
+!*.css
+!*.js
+!README.md
+!CLAUDE.md
+!LICENSE
+!requirements.txt
+!.gitignore
+!*.example
+!*.example.*
+!docs/*.png
+
+# Never, even if matched above. These come last so they win.
 # data/ holds the live database, its daily backups and the real starting rows.
 data/
 # The original single-file tracker, which has real applications embedded in it.
 original/
 # Local working notes (network addresses, personal context).
-CLAUDE.md
-__pycache__/
-*.pyc
-job-tracker.service
+CLAUDE.local.md
 screenshots/
+*.db
+*.sqlite*
+*.csv
+*.log
+.env*
+*.pem
+*.key
+known_hosts
+*.service
+*.bak
+*.old
+*.orig
+*~
+__pycache__/
+venv/
+.venv/
+node_modules/
