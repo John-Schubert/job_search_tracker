@@ -10,6 +10,7 @@ private clients, a local Host header, JSON-only writes.
   GET  /                  the page (?all=1 shows every panel after the
                           done-line is met or the day is closed)
   POST /api/count         {"kind": "networking"|"followups", "delta": 1|-1}
+  POST /api/checkin       {"energy": 1-5, "activity": "...", "note": "..."}
 
 Set DASHBOARD_NOW=YYYY-MM-DDTHH:MM to render as if it were that time (tests
 and the demo).
@@ -66,16 +67,21 @@ class Page:
         self.ts = self.now.timestamp()
         self.today = self.now.date()
         self.t = reader.Tracker(cfg["tracker_db"])
+        week_ago = (self.today - datetime.timedelta(days=6)).isoformat()
         with store.Store() as s:
             self.counts = s.counts(self.today.isoformat())
+            self.checkin = s.checkin(self.today.isoformat())
+            self.week = {c["date"]: c for c in s.checkins(week_ago, self.today.isoformat())}
+            self.recent = s.recent_checkins(14)
         self.light = DAYS[self.today.weekday()] in cfg["light_days"]
         self.target = cfg["light_day_line"] if self.light else cfg["done_line"]
         self.progress = {"applications": self.t.applied_between(self.today, self.today), **self.counts}
         self.met = all(self.progress[k] >= n for k, n in self.target.items())
         hh, mm = (int(x) for x in cfg["hard_stop"].split(":"))
+        self.after_stop = self.now.time() >= datetime.time(hh, mm)
         # A call today or tomorrow keeps the search open in the evening.
         self.calls_soon = self.t.upcoming_calls(self.today, 1)
-        self.closed = self.now.time() >= datetime.time(hh, mm) and not self.calls_soon
+        self.closed = self.after_stop and not self.calls_soon
 
     def link(self, j):
         return (f'<a href="{esc(self.cfg["tracker_url"])}" title="Opens the tracker. Search for this company there.">'
@@ -101,12 +107,16 @@ class Page:
             met = " met" if n >= goal else ""
             rows.append(f'<div class="goal{met}"><span class="label">{label}</span>'
                         f'<span class="n">{n} of {goal}</span>{buttons}</div>')
+        # Recovery is part of the plan, so it sits with the work counts.
+        activity = (self.checkin or {}).get("activity", "")
+        rows.append(f'<div class="goal{" met" if activity else ""}"><span class="label">Non-job activity</span>'
+                    f'<span class="n">{esc(activity) if activity else "<span class=muted>not set yet</span>"}</span></div>')
         title = "Today, a light day" if self.light else "Today"
         out = [f'<section><h2>{title} <span class="sub">{self.today:%A, %B} {self.today.day}</span></h2>{"".join(rows)}']
         if self.progress["applications"] > self.cfg["volume_note_over"]:
             out.append('<p class="note muted">A lot of applications went out today. Volume is not the goal; '
                        'a few targeted ones go further.</p>')
-        if self.calls_soon and self.now.time() >= datetime.time(*(int(x) for x in self.cfg["hard_stop"].split(":"))):
+        if self.calls_soon and self.after_stop:
             out.append('<p class="note muted">Open late because of a call coming up.</p>')
         out.append("</section>")
         return "".join(out)
@@ -145,12 +155,64 @@ class Page:
         body = f'<ul>{"".join(items)}</ul>{more}' if items else '<div class="muted">Nothing is due right now.</div>'
         return f'<section><h2>Due now</h2>{body}</section>'
 
+    # 4. Energy and recovery check-in
+    def checkin_panel(self):
+        c = self.checkin or {}
+        scale = "".join(f'<label title="{n}"><input type="radio" name="energy" value="{n}"'
+                        f'{" checked" if c.get("energy") == n else ""}><span>{n}</span></label>' for n in range(1, 6))
+        acts = "".join(f'<option value="{esc(a)}">' for a in self.cfg["activities"])
+        saved = '<span class="muted">Saved for today. Change it any time.</span>' if c else ""
+        return f"""<section><h2>Energy and recovery</h2>
+<form data-api="/api/checkin">
+  <div class="row"><span class="muted">Energy, 1 low to 5 high</span><div class="scale">{scale}</div></div>
+  <div class="row"><input type="text" name="activity" list="acts" maxlength="200" value="{esc(c.get("activity", ""))}"
+    placeholder="Non-job activity, done or planned"></div>
+  <datalist id="acts">{acts}</datalist>
+  <div class="row"><input type="text" name="note" maxlength="300" value="{esc(c.get("note", ""))}" placeholder="Note (optional)"></div>
+  <div class="row"><button class="primary">Save</button>{saved}</div>
+</form>
+{self.trend()}{self.burnout_note()}</section>"""
+
+    def trend(self):
+        days = []
+        for i in range(6, -1, -1):
+            d = self.today - datetime.timedelta(days=i)
+            c = self.week.get(d.isoformat())
+            if c:
+                tip = f'{d:%a}: energy {c["energy"]}' + (f', {c["activity"]}' if c["activity"] else "")
+                bar = f'<div class="bar" style="height:{c["energy"] * 11}px"></div>'
+                dot = "&bull;" if c["activity"] else ""
+            else:
+                tip, bar, dot = f"{d:%a}: no check-in", "", ""
+            days.append(f'<div class="day" title="{esc(tip)}">{bar}<span class="dot">{dot}</span>{d:%a}</div>')
+        return (f'<div class="trend">{"".join(days)}</div>'
+                '<div class="sub">Last 7 days. Bar height is energy; a dot means a non-job activity.</div>')
+
+    # 5. Burnout signal: one quiet note at most
+    def burnout_note(self):
+        recent = self.recent    # newest first, up to 14 check-ins
+        start = (self.today - datetime.timedelta(days=13)).isoformat()
+        window = [c for c in recent if c["date"] >= start]
+        if (len(window) >= 10 and all(c["energy"] <= 2 for c in window)
+                and window[-1]["date"] <= (self.today - datetime.timedelta(days=12)).isoformat()):
+            msg = ("Energy has stayed at 1 or 2 for about two weeks. Burnout is common in long searches, "
+                   "and support helps. It may be worth talking with your doctor or a counselor.")
+        elif len(recent) >= 5 and sum(c["energy"] for c in recent[:5]) / 5 <= 2:
+            msg = "Energy has been low for a few days. A lighter day could help: one follow-up, then time away from the screen."
+        elif (len(recent) >= 3 and not any(c["activity"] for c in recent[:3])
+              and datetime.date.fromisoformat(recent[0]["date"]) - datetime.date.fromisoformat(recent[2]["date"])
+              == datetime.timedelta(days=2)):
+            msg = "No non-job activity for three days. A lighter day with a walk or some station time might be good."
+        else:
+            return ""
+        return f'<p class="note muted">{msg}</p>'
+
     def render(self):
         resting = (self.met or self.closed) and not self.show_all
         if resting:
-            panels = [self.resting_panel()]
+            panels = [self.resting_panel(), self.checkin_panel()]
         else:
-            panels = [self.today_panel(), self.due_panel()]
+            panels = [self.today_panel(), self.due_panel(), self.checkin_panel()]
         url = esc(self.cfg["tracker_url"])
         return f"""<!doctype html>
 <html lang="en">
@@ -277,6 +339,10 @@ class Handler(BaseHTTPRequestHandler):
             with store.Store() as s:
                 if path == "/api/count":
                     s.bump(today, data.get("kind"), data.get("delta"))
+                elif path == "/api/checkin":
+                    energy = str(data.get("energy") or "")
+                    s.save_checkin(today, int(energy) if energy.isdigit() else 0,
+                                   data.get("activity"), data.get("note"))
                 else:
                     return self.send_json({"error": "not found"}, 404)
         except ValueError as e:

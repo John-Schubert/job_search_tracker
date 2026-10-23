@@ -127,7 +127,7 @@ class Store:
 
     def save_checkin(self, date, energy, activity, note):
         if energy not in (1, 2, 3, 4, 5):
-            raise ValueError("energy is 1 to 5")
+            raise ValueError("Pick an energy level from 1 to 5.")
         self.db.execute("""INSERT INTO checkins (date, energy, activity, note, updated) VALUES (?, ?, ?, ?, ?)
                            ON CONFLICT (date) DO UPDATE SET energy = excluded.energy, activity = excluded.activity,
                            note = excluded.note, updated = excluded.updated""",
