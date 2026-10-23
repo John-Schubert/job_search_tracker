@@ -8,9 +8,15 @@ Python standard library only. Same home-network rules as the tracker:
 private clients, a local Host header, JSON-only writes.
 
   GET  /                  the page (?all=1 shows every panel after the
-                          done-line is met or the day is closed)
+                          done-line is met or the day is closed; ?review=1
+                          shows the weekly review on any day)
   POST /api/count         {"kind": "networking"|"followups", "delta": 1|-1}
   POST /api/checkin       {"energy": 1-5, "activity": "...", "note": "..."}
+  POST /api/resume        {"job_id": tracker row id, "version": "v2" or "" to clear}
+  POST /api/lesson        {"job_id", "reason": "rejected"|"ghosted", "text"}
+  POST /api/review        {"moved", "worked", "change", "proud"} for this week
+  POST /api/win           {"text"}
+  POST /api/win/delete    {"id"}
 
 Set DASHBOARD_NOW=YYYY-MM-DDTHH:MM to render as if it were that time (tests
 and the demo).
@@ -20,6 +26,8 @@ import html
 import ipaddress
 import json
 import os
+import random
+import re
 import socket
 import sys
 import time
@@ -33,6 +41,7 @@ BASE = os.path.dirname(os.path.abspath(__file__))
 STATIC = os.path.join(BASE, "static")
 PORT = int(os.environ.get("PORT", "8050"))
 MAX_BODY = 20_000
+JOB_ID = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
 DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
 HOSTNAMES = {"localhost", socket.gethostname().lower(), socket.gethostname().lower() + ".local"}
@@ -60,7 +69,7 @@ def plural(n, word):
 class Page:
     """Everything one page view needs, gathered once."""
 
-    def __init__(self, cfg, show_all=False):
+    def __init__(self, cfg, show_all=False, show_review=False):
         self.cfg = cfg
         self.show_all = show_all
         self.now = now()
@@ -73,6 +82,15 @@ class Page:
             self.checkin = s.checkin(self.today.isoformat())
             self.week = {c["date"]: c for c in s.checkins(week_ago, self.today.isoformat())}
             self.recent = s.recent_checkins(14)
+            self.monday = self.today - datetime.timedelta(days=self.today.weekday())
+            sunday = self.monday + datetime.timedelta(days=6)
+            self.week_counts = s.counts_between(self.monday.isoformat(), sunday.isoformat())
+            self.week_checkins = s.checkins(self.monday.isoformat(), sunday.isoformat())
+            self.review = s.review(self.monday.isoformat())
+            self.wins = s.wins()
+            self.tags = s.resume_tags()
+            self.answered = s.lessons_answered()
+            self.baseline = s.baseline()
         self.light = DAYS[self.today.weekday()] in cfg["light_days"]
         self.target = cfg["light_day_line"] if self.light else cfg["done_line"]
         self.progress = {"applications": self.t.applied_between(self.today, self.today), **self.counts}
@@ -82,6 +100,9 @@ class Page:
         # A call today or tomorrow keeps the search open in the evening.
         self.calls_soon = self.t.upcoming_calls(self.today, 1)
         self.closed = self.after_stop and not self.calls_soon
+        self.review_day = DAYS[self.today.weekday()] == cfg["review_day"]
+        self.review_asked = show_review
+        self.show_review = show_review or self.review_day
 
     def link(self, j):
         return (f'<a href="{esc(self.cfg["tracker_url"])}" title="Opens the tracker. Search for this company there.">'
@@ -128,7 +149,9 @@ class Page:
         else:
             msg = "Done for today."
             sub = "The done-line is met. The rest of the day is yours."
-        return (f'<section class="calm"><h2>{msg}</h2><div>{sub}</div>'
+        review = ('<div class="more">It is weekly review day. <a href="?review=1">Open the review</a></div>'
+                  if self.review_day and not self.review and not self.review_asked else "")
+        return (f'<section class="calm"><h2>{msg}</h2><div>{sub}</div>{review}'
                 f'<div class="more"><a href="?all=1">Show everything anyway</a></div></section>')
 
     # 2. Due now
@@ -174,6 +197,8 @@ class Page:
 {self.trend()}{self.burnout_note()}</section>"""
 
     def trend(self):
+        if not self.week:
+            return '<div class="sub note">The 7-day trend starts with the first check-in.</div>'
         days = []
         for i in range(6, -1, -1):
             d = self.today - datetime.timedelta(days=i)
@@ -207,12 +232,128 @@ class Page:
             return ""
         return f'<p class="note muted">{msg}</p>'
 
+    # 3. Pipeline snapshot
+    def rates_table(self):
+        """Response rate by resume version, over every application sent."""
+        rows = {}
+        for j in self.t.sent():
+            r = rows.setdefault(self.tags.get(j["id"], ""), [0, 0])
+            r[0] += 1
+            r[1] += self.t.responded(j["id"])
+        if not rows:
+            return '<div class="muted">No applications sent yet.</div>'
+        trs = ""
+        for v in sorted(k for k in rows if k) + ([""] if "" in rows else []):
+            n, r = rows[v]
+            name = esc(v) if v else '<span class="muted">not tagged</span>'
+            trs += f'<tr><td>{name}</td><td class="num">{n}</td><td class="num">{r}</td><td class="num">{round(100 * r / n)}%</td></tr>'
+        return ('<table><tr><th>Resume</th><th class="num">Sent</th><th class="num">Responses</th>'
+                f'<th class="num">Rate</th></tr>{trs}</table>'
+                '<div class="sub">A response is a recruiter screen or any later stage, at any point.</div>')
+
+    def pipeline_panel(self):
+        counts = self.t.status_counts()
+        chips = " ".join(f'<span class="tag">{esc(st)} {counts[st]}</span>' for st in reader.STATUSES if counts.get(st))
+        last_monday = self.monday - datetime.timedelta(days=7)
+        this_week = self.t.applied_between(self.monday, self.today)
+        last_week = self.t.applied_between(last_monday, self.monday - datetime.timedelta(days=1))
+        since = self.today - datetime.timedelta(days=14)
+        recent = sorted((j for j in self.t.sent() if j["applied_date"] >= since),
+                        key=lambda j: j["applied_date"], reverse=True)
+        tag_rows = []
+        for j in recent:
+            cur = self.tags.get(j["id"], "")
+            versions = list(self.cfg["resume_versions"]) + ([cur] if cur and cur not in self.cfg["resume_versions"] else [])
+            opts = '<option value="">untagged</option>' + "".join(
+                f'<option{" selected" if v == cur else ""}>{esc(v)}</option>' for v in versions)
+            body = esc(json.dumps({"job_id": j["id"]}))
+            tag_rows.append(f'<li class="goal"><span class="label">{esc(j["company"])}, {esc(j["role"])} '
+                            f'<span class="muted">({short(j["applied_date"])})</span></span>'
+                            f'<select name="version" data-api="/api/resume" data-body="{body}">{opts}</select></li>')
+        untagged = sum(1 for j in recent if j["id"] not in self.tags)
+        tagging = (f'<details{" open" if untagged else ""}><summary>Resume version for the last two weeks of '
+                   f'applications ({untagged} untagged)</summary><ul>{"".join(tag_rows)}</ul></details>'
+                   if recent else "")
+        return (f'<section><h2>Pipeline</h2><div>{chips}</div>'
+                f'<p class="note">Applications this week: {this_week}. Last week: {last_week}.</p>'
+                f'{self.rates_table()}{tagging}</section>')
+
+    # 6. Weekly review
+    def review_panel(self):
+        r = self.review or {}
+        apps = self.t.applied_between(self.monday, self.today)
+        net, fol = self.week_counts["networking"], self.week_counts["followups"]
+        energies = [c["energy"] for c in self.week_checkins]
+        avg = f"average energy {sum(energies) / len(energies):.1f}" if energies else "no check-ins yet"
+        stats = (f'This week: {plural(apps, "application")}, {net} networking touch{"" if net == 1 else "es"}, '
+                 f'{plural(fol, "follow-up")}, {avg}.')
+        # The same win all week, so a reload does not shuffle it.
+        win = random.Random(self.monday.isoformat()).choice(self.wins) if self.wins else None
+        win_line = f'<p class="note">A win to remember: {esc(win["text"])}</p>' if win else ""
+        prompts = [("moved", "What moved forward this week?"),
+                   ("worked", "Which resume version or approach got responses?"),
+                   ("change", "What is one thing I will drop or do differently next week?"),
+                   ("proud", "What am I proud of this week, even if it was small?")]
+        fields = "".join(f'<label class="q">{q}<textarea name="{k}" maxlength="1000">{esc(r.get(k, ""))}</textarea></label>'
+                         for k, q in prompts)
+        saved = '<span class="muted">Saved. You can change it until the week ends.</span>' if r else ""
+        return (f'<section><h2>Weekly review <span class="sub">week of {short(self.monday)}, about 10 minutes</span></h2>'
+                f'<p class="note">{stats}</p>{self.rates_table()}{win_line}'
+                f'<form data-api="/api/review">{fields}<div class="row"><button class="primary">Save</button>{saved}</div></form>'
+                '</section>')
+
+    # 7. Wins log
+    def wins_panel(self):
+        def item(w):
+            body = esc(json.dumps({"id": w["id"]}))
+            return (f'<li>{esc(w["text"])} <span class="muted">{short(reader.day(w["ts"]))}</span> '
+                    f'<button type="button" class="small" data-api="/api/win/delete" data-body="{body}">remove</button></li>')
+        latest = "".join(item(w) for w in self.wins[:5])
+        older = (f'<details><summary>{plural(len(self.wins) - 5, "older win")}</summary>'
+                 f'<ul>{"".join(item(w) for w in self.wins[5:])}</ul></details>' if len(self.wins) > 5 else "")
+        return (f'<section><h2>Wins</h2><ul>{latest}</ul>{older}'
+                '<form data-api="/api/win"><div class="row"><input type="text" name="text" maxlength="300" style="flex:1;width:auto" '
+                'placeholder="A recruiter reply, an interview, a kind word about your background"><button>Add</button></div></form>'
+                '</section>')
+
+    # 8. One question when an application closes
+    def lesson_panel(self):
+        ask = [(ts, j, "rejected") for j, ts in self.t.rejected_since(self.baseline)
+               if (j["id"], "rejected") not in self.answered]
+        ask += [(ts, j, "ghosted") for j, ts in self.t.ghosted(self.ts, self.cfg["ghosted_days"])
+                if ts > self.baseline and (j["id"], "ghosted") not in self.answered]
+        if not ask:
+            return ""
+        ts, j, reason = min(ask, key=lambda a: a[0])
+        if reason == "rejected":
+            what = "was marked Rejected in the tracker."
+        else:
+            what = (f'has had no reply for {self.cfg["ghosted_days"]} days, so it may be ghosted. '
+                    "The tracker is not changed.")
+        skip = esc(json.dumps({"job_id": j["id"], "reason": reason, "text": ""}))
+        more = f'<div class="sub">{len(ask) - 1} more after this one.</div>' if len(ask) > 1 else ""
+        return (f'<section><h2>One question</h2><div>{self.link(j)} {what}</div>'
+                f'<form data-api="/api/lesson"><input type="hidden" name="job_id" value="{esc(j["id"])}">'
+                f'<input type="hidden" name="reason" value="{reason}">'
+                '<div class="row"><input type="text" name="text" maxlength="300" style="flex:1;width:auto" '
+                'placeholder="One line on what you learned"><button class="primary">Save</button>'
+                f'<button type="button" data-api="/api/lesson" data-body="{skip}">Nothing, move on</button></div></form>'
+                f'{more}</section>')
+
     def render(self):
         resting = (self.met or self.closed) and not self.show_all
         if resting:
             panels = [self.resting_panel(), self.checkin_panel()]
+            if self.review_asked:
+                panels.append(self.review_panel())
         else:
-            panels = [self.today_panel(), self.due_panel(), self.checkin_panel()]
+            panels = [self.today_panel(), self.due_panel(), self.lesson_panel(), self.pipeline_panel(),
+                      self.checkin_panel()]
+            if self.show_review:
+                panels.append(self.review_panel())
+            panels.append(self.wins_panel())
+            if not self.show_review:
+                panels.append('<div class="sub"><a href="?all=1&amp;review=1">Weekly review</a></div>')
         url = esc(self.cfg["tracker_url"])
         return f"""<!doctype html>
 <html lang="en">
@@ -313,7 +454,8 @@ class Handler(BaseHTTPRequestHandler):
         url = urlparse(self.path)
         if url.path == "/":
             try:
-                page = Page(self.cfg, parse_qs(url.query).get("all") == ["1"]).render()
+                q = parse_qs(url.query)
+                page = Page(self.cfg, q.get("all") == ["1"], q.get("review") == ["1"]).render()
             except Exception as e:    # e.g. the tracker database is missing
                 print(f"page failed: {e!r}", file=sys.stderr)
                 return self.send("<p>The dashboard could not read the tracker just now. "
@@ -334,7 +476,13 @@ class Handler(BaseHTTPRequestHandler):
         data = self.body()
         if data is None:
             return
-        today = now().date().isoformat()
+        today = now().date()
+        monday = (today - datetime.timedelta(days=today.weekday())).isoformat()
+        today = today.isoformat()
+        job = str(data.get("job_id") or "")
+        if path in ("/api/resume", "/api/lesson") and (
+                not JOB_ID.match(job) or job not in reader.Tracker(self.cfg["tracker_db"]).by_id):
+            return self.send_json({"error": "That application was not found in the tracker."}, 400)
         try:
             with store.Store() as s:
                 if path == "/api/count":
@@ -343,6 +491,16 @@ class Handler(BaseHTTPRequestHandler):
                     energy = str(data.get("energy") or "")
                     s.save_checkin(today, int(energy) if energy.isdigit() else 0,
                                    data.get("activity"), data.get("note"))
+                elif path == "/api/resume":
+                    s.tag_resume(job, data.get("version"))
+                elif path == "/api/lesson":
+                    s.save_lesson(job, data.get("reason"), data.get("text"))
+                elif path == "/api/review":
+                    s.save_review(monday, data.get("moved"), data.get("worked"), data.get("change"), data.get("proud"))
+                elif path == "/api/win":
+                    s.add_win(data.get("text"))
+                elif path == "/api/win/delete":
+                    s.set_win_deleted(int(data.get("id") or 0), True)
                 else:
                     return self.send_json({"error": "not found"}, 404)
         except ValueError as e:

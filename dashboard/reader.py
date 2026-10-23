@@ -17,6 +17,9 @@ import sys
 import time
 from urllib.parse import quote
 
+# The tracker's statuses, in its own order.
+STATUSES = ["Researching", "Preparing", "Applied", "Recruiter screen", "Interviewing",
+            "Awaiting decision", "Offer", "Rejected", "Closed / filled", "Withdrawn"]
 ENDED = {"Rejected", "Closed / filled", "Withdrawn"}
 NOT_SENT = {"Researching", "Preparing"}
 RESPONDED = {"Recruiter screen", "Interviewing", "Awaiting decision", "Offer"}

@@ -22,7 +22,7 @@ document.addEventListener("submit", e => {
 
 document.addEventListener("click", e => {
   const b = e.target.closest("button[data-api]");
-  if (!b || b.form) return;
+  if (!b) return;
   send(b.dataset.api, JSON.parse(b.dataset.body || "{}"));
 });
 

@@ -140,7 +140,7 @@ class Store:
     def add_win(self, t):
         t = text(t)
         if not t:
-            raise ValueError("the win has no text")
+            raise ValueError("Type the win first.")
         self.db.execute("INSERT INTO wins (ts, text) VALUES (?, ?)", (time.time(), t))
 
     def set_win_deleted(self, win_id, deleted):

@@ -50,10 +50,13 @@ form .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:6px}
 .scale label:has(input:focus-visible){outline:2px solid var(--accent)}
 .note{font-size:13px;margin-top:8px}
 .tag{background:var(--soft);border-radius:999px;padding:1px 8px;font-size:12px;white-space:nowrap}
-table{border-collapse:collapse;width:100%}
-td,th{text-align:left;padding:3px 6px 3px 0;font-weight:normal}
+table{border-collapse:collapse;margin-top:6px}
+td,th{text-align:left;padding:3px 18px 3px 0;font-weight:normal}
 th{color:var(--muted);font-size:12px}
-td.num{text-align:right;font-variant-numeric:tabular-nums}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+label.q{display:block;margin-top:8px}
+label.q textarea{display:block;margin-top:3px}
+details{margin-top:8px}
 .trend{display:flex;gap:6px;align-items:flex-end;height:70px;margin-top:4px}
 .trend .day{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;font-size:11px;color:var(--muted)}
 .trend .bar{width:100%;max-width:26px;background:var(--bar);border-radius:3px 3px 0 0}
