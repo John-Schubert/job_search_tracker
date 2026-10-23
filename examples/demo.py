@@ -2,15 +2,20 @@
 """Run a throwaway copy of the tracker filled with fictional data.
 
 For trying it out and for taking screenshots without touching a real
-database. Copies the server and pages to a temporary folder, loads
-seed.example.json, adds a few sample log entries and a status change, and
-serves on port 8767 (or $PORT) until interrupted.
+database. Copies the server, pages and the Today dashboard to a temporary
+folder, loads seed.example.json, adds a few sample log entries, a status
+change, and a week of made-up check-ins and wins, and serves on port 8767
+(or $PORT) until interrupted. The demo clock is pinned to 10:30 AM today so
+the Today page shows its working view.
 
     python3 examples/demo.py
 """
+import datetime
 import json
 import os
 import shutil
+import signal
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -30,13 +35,51 @@ def call(method, path, body=None):
     return json.load(urllib.request.urlopen(req))
 
 
+def seed_today(tmp, rows, today):
+    """Fictional data for the Today page: one application sent today, a call in
+    two days, a fresh rejection to ask about, a week of check-ins and two wins."""
+    def day(n):
+        return (today - datetime.timedelta(days=n)).isoformat()
+
+    call("PUT", "/api/jobs/ex08", {"company": "Wayne Aerospace", "role": "Flight Test Engineer",
+                                   "status": "Applied", "applied": today.isoformat(),
+                                   "next": "Follow up in a week"})
+    r = rows["ex01"]
+    r.update(followup=(today + datetime.timedelta(days=2)).isoformat())
+    call("PUT", "/api/jobs/ex01", r)
+    r = rows["ex04"]
+    r.update(status="Rejected")
+    call("PUT", "/api/jobs/ex04", r)
+    call("POST", "/api/today/count", {"kind": "networking", "delta": 1})
+    call("POST", "/api/today/checkin", {"energy": "4", "activity": "Walk at lunch, then the radio station tonight"})
+    call("POST", "/api/today/win", {"text": "Initech recruiter replied the same day"})
+    call("POST", "/api/today/win", {"text": "Globex panel said the test background stood out"})
+    for job, version in (("ex01", "v2"), ("ex02", "v1"), ("ex03", "v2"), ("ex05", "v1"), ("ex08", "v2")):
+        call("POST", "/api/today/resume", {"job_id": job, "version": version})
+    # Earlier days can only be written directly; the page saves today's check-in only.
+    db = sqlite3.connect(os.path.join(tmp, "data", "dashboard", "dashboard.db"))
+    week = [(3, "3D printing"), (2, ""), (3, "Cooking"), (4, "Drone flying"), (3, "Walking"), (2, "APRS station work")]
+    for n, (energy, activity) in enumerate(week, 1):
+        db.execute("INSERT OR REPLACE INTO checkins (date, energy, activity, note, updated) VALUES (?, ?, ?, '', ?)",
+                   (day(n), energy, activity, time.time()))
+    db.commit()
+    db.close()
+
+
 def main():
+    # A plain kill (SIGTERM) also stops the copied server and removes the folder.
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     tmp = tempfile.mkdtemp(prefix="job-tracker-demo-")
     shutil.copy(os.path.join(ROOT, "server.py"), tmp)
     shutil.copytree(os.path.join(ROOT, "static"), os.path.join(tmp, "static"))
+    shutil.copytree(os.path.join(ROOT, "dashboard"), os.path.join(tmp, "dashboard"),
+                    ignore=shutil.ignore_patterns("data", "__pycache__"))
     os.makedirs(os.path.join(tmp, "data"))
     shutil.copy(os.path.join(HERE, "seed.example.json"), os.path.join(tmp, "data", "seed.json"))
-    server = subprocess.Popen([sys.executable, "server.py"], cwd=tmp, env=dict(os.environ, PORT=PORT))
+    today = datetime.date.today()
+    env = dict(os.environ, PORT=PORT, DASHBOARD_NOW=f"{today.isoformat()}T10:30")
+    env.pop("DASHBOARD_DATA", None)
+    server = subprocess.Popen([sys.executable, "server.py"], cwd=tmp, env=env)
     try:
         for _ in range(50):
             try:
@@ -69,6 +112,7 @@ def main():
         r = rows["ex01"]
         r.update(notes=r["notes"] + " Panel confirmed for next Tuesday.")
         call("PUT", "/api/jobs/ex01", r)
+        seed_today(tmp, rows, today)
 
         print("Demo with fictional data: http://localhost:%s/   (Ctrl+C to stop)" % PORT, flush=True)
         server.wait()

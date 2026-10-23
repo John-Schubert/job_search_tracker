@@ -1,7 +1,7 @@
 # Job Search Tracker
 
 A small self-hosted web app for keeping a job search organised: one table of
-applications and one dated activity log, served from a single Python file
+applications, one dated activity log and a calm daily page, served from a single Python file
 with a SQLite database. No dependencies beyond Python 3, no build step, no
 accounts.
 
@@ -35,6 +35,28 @@ same list.
 - Search, filter by company, edit, delete, undo.
 
 ![Log page with example data](docs/log.png)
+
+**Today**
+
+- A daily done-line, all configurable: by default 2 targeted applications
+  (counted from the tracker), 1 networking touch and 1 follow-up (one tap
+  each). Light days drop it to a single follow-up.
+- When the line is met, or after the stop time (5 PM by default), the page
+  says so and shows only the check-in. A call coming up keeps it open.
+- Due now: calls in the next few days, follow-ups due, and applications that
+  have gone quiet.
+- Pipeline: counts by status, this week against last, and response rate by
+  resume version (tag each application on the page).
+- An energy and recovery check-in with a 7-day trend. A non-job activity
+  counts as part of the plan, and one quiet note suggests a lighter day when
+  energy stays low.
+- A weekly review with four short prompts, a wins log, and one question when
+  an application is rejected or goes quiet.
+- It only reads the tracker's data and never changes it. Its own data lives
+  in `data/dashboard/`. Settings are in `data/dashboard/config.json`, created
+  from `dashboard/config.example.json` on the first start.
+
+![Today page with example data](docs/today.png)
 
 The screenshots use the fictional rows in `examples/seed.example.json`.
 More in the [screenshot gallery](https://john-schubert.github.io/job_search_tracker_gallery/).
@@ -78,8 +100,10 @@ sudo systemctl enable --now job-tracker.service
 
 ## Design notes
 
-- **One file, standard library only.** `server.py` uses `http.server` and
-  `sqlite3`. The two pages in `static/` are plain HTML and JavaScript.
+- **Standard library only.** `server.py` uses `http.server` and `sqlite3`.
+  The two pages in `static/` are plain HTML and JavaScript. The Today page is
+  built on the server by `dashboard/`, which opens the tracker database
+  read-only and keeps its own small database.
 - **No login, on purpose, so it must stay on a private network.** In place of
   a password the server refuses clients that are not on a private address,
   refuses requests whose `Host` header is not a private IP or a local name
@@ -108,6 +132,8 @@ sudo systemctl enable --now job-tracker.service
 | PUT | `/api/log/<id>` | Create or update a log entry |
 | DELETE | `/api/log/<id>` | Remove a log entry (restorable) |
 | POST | `/api/log/<id>/restore` | Restore a removed log entry |
+| GET | `/today` | The Today page (`?all=1` shows every panel, `?review=1` the weekly review) |
+| POST | `/api/today/<action>` | The Today page's own saves: `count`, `checkin`, `resume`, `lesson`, `review`, `win`, `win-delete` |
 
 ## How it was built
 
@@ -118,9 +144,11 @@ network safeguards. It was built with Claude Code.
 
 ## Privacy
 
-The repository contains code and fictional examples only. `data/` is ignored
-by git, and a pre-commit hook in the working copy refuses to commit anything
-from it.
+The repository contains code and fictional examples only. `data/`, which
+also holds the Today page's check-ins, wins and reviews, is ignored by git.
+The hooks in `githooks/` (install them in each clone with
+`python3 githooks/install.py`) refuse to commit data files or personal
+details, and list every file before a push.
 
 ## License
 
