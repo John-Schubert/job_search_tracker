@@ -1,51 +1,39 @@
-#!/usr/bin/env python3
-"""Job search daily dashboard: one calm page on top of the tracker and log.
+"""Job search daily dashboard: the Today page of the tracker site.
 
-Reads the tracker's database read-only (reader.py) and keeps its own small
-database for check-ins, counters and the rest (store.py). The page is
-rendered here as plain HTML; static/dashboard.js only sends form data.
-Python standard library only. Same home-network rules as the tracker:
-private clients, a local Host header, JSON-only writes.
+server.py serves it at /today. It reads the tracker's database read-only
+(reader.py) and keeps its own small database for check-ins, counters and the
+rest (store.py). The page is rendered here as plain HTML; today.js only sends
+form data. Python standard library only.
 
-  GET  /                  the page (?all=1 shows every panel after the
-                          done-line is met or the day is closed; ?review=1
-                          shows the weekly review on any day)
-  POST /api/count         {"kind": "networking"|"followups", "delta": 1|-1}
-  POST /api/checkin       {"energy": 1-5, "activity": "...", "note": "..."}
-  POST /api/resume        {"job_id": tracker row id, "version": "v2" or "" to clear}
-  POST /api/lesson        {"job_id", "reason": "rejected"|"ghosted", "text"}
-  POST /api/review        {"moved", "worked", "change", "proud"} for this week
-  POST /api/win           {"text"}
-  POST /api/win/delete    {"id"}
+  GET  /today             page(): ?all=1 shows every panel after the done-line
+                          is met or the day is closed; ?review=1 shows the
+                          weekly review on any day
+  POST /api/today/<action>  save(), with a JSON object:
+       count              {"kind": "networking"|"followups", "delta": 1|-1}
+       checkin            {"energy": 1-5, "activity": "...", "note": "..."}
+       resume             {"job_id": tracker row id, "version": "v2" or "" to clear}
+       lesson             {"job_id", "reason": "rejected"|"ghosted", "text"}
+       review             {"moved", "worked", "change", "proud"} for this week
+       win                {"text"}
+       win-delete         {"id"}
 
 Set DASHBOARD_NOW=YYYY-MM-DDTHH:MM to render as if it were that time (tests
 and the demo).
 """
 import datetime
 import html
-import ipaddress
 import json
 import os
 import random
 import re
-import socket
-import sys
-import time
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlparse
 
 import reader
 import store
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 STATIC = os.path.join(BASE, "static")
-PORT = int(os.environ.get("PORT", "8050"))
-MAX_BODY = 20_000
 JOB_ID = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
 DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-
-HOSTNAMES = {"localhost", socket.gethostname().lower(), socket.gethostname().lower() + ".local"}
-HOSTNAMES |= {h.strip().lower() for h in os.environ.get("ALLOWED_HOSTS", "").split(",") if h.strip()}
 
 
 def now():
@@ -105,7 +93,7 @@ class Page:
         self.show_review = show_review or self.review_day
 
     def link(self, j):
-        return (f'<a href="{esc(self.cfg["tracker_url"])}" title="Opens the tracker. Search for this company there.">'
+        return (f'<a href="/" title="Opens the tracker. Search for this company there.">'
                 f'{esc(j["company"])}</a>, {esc(j["role"])}')
 
     # 1. Today
@@ -122,8 +110,8 @@ class Page:
             else:
                 body = esc(json.dumps({"kind": kind, "delta": 1}))
                 undo = esc(json.dumps({"kind": kind, "delta": -1}))
-                buttons = (f'<button data-api="/api/count" data-body="{body}">+1</button>'
-                           + (f'<button class="small" data-api="/api/count" data-body="{undo}" title="Take one back">undo</button>'
+                buttons = (f'<button data-api="/api/today/count" data-body="{body}">+1</button>'
+                           + (f'<button class="small" data-api="/api/today/count" data-body="{undo}" title="Take one back">undo</button>'
                               if n else ""))
             met = " met" if n >= goal else ""
             rows.append(f'<div class="goal{met}"><span class="label">{label}</span>'
@@ -174,7 +162,7 @@ class Page:
             since = short(reader.day(j["last_activity"]))
             items.append(f'<li>Quiet since {since}: {self.link(j)}</li>')
         more = (f'<div class="more muted">{plural(len(quiet) - 4, "more quiet application")} in the '
-                f'<a href="{esc(self.cfg["tracker_url"])}">tracker</a>.</div>' if len(quiet) > 4 else "")
+                f'<a href="/">tracker</a>.</div>' if len(quiet) > 4 else "")
         body = f'<ul>{"".join(items)}</ul>{more}' if items else '<div class="muted">Nothing is due right now.</div>'
         return f'<section><h2>Due now</h2>{body}</section>'
 
@@ -186,7 +174,7 @@ class Page:
         acts = "".join(f'<option value="{esc(a)}">' for a in self.cfg["activities"])
         saved = '<span class="muted">Saved for today. Change it any time.</span>' if c else ""
         return f"""<section><h2>Energy and recovery</h2>
-<form data-api="/api/checkin">
+<form data-api="/api/today/checkin">
   <div class="row"><span class="muted">Energy, 1 low to 5 high</span><div class="scale">{scale}</div></div>
   <div class="row"><input type="text" name="activity" list="acts" maxlength="200" value="{esc(c.get("activity", ""))}"
     placeholder="Non-job activity, done or planned"></div>
@@ -269,7 +257,7 @@ class Page:
             body = esc(json.dumps({"job_id": j["id"]}))
             tag_rows.append(f'<li class="goal"><span class="label">{esc(j["company"])}, {esc(j["role"])} '
                             f'<span class="muted">({short(j["applied_date"])})</span></span>'
-                            f'<select name="version" data-api="/api/resume" data-body="{body}">{opts}</select></li>')
+                            f'<select name="version" data-api="/api/today/resume" data-body="{body}">{opts}</select></li>')
         untagged = sum(1 for j in recent if j["id"] not in self.tags)
         tagging = (f'<details{" open" if untagged else ""}><summary>Resume version for the last two weeks of '
                    f'applications ({untagged} untagged)</summary><ul>{"".join(tag_rows)}</ul></details>'
@@ -299,7 +287,7 @@ class Page:
         saved = '<span class="muted">Saved. You can change it until the week ends.</span>' if r else ""
         return (f'<section><h2>Weekly review <span class="sub">week of {short(self.monday)}, about 10 minutes</span></h2>'
                 f'<p class="note">{stats}</p>{self.rates_table()}{win_line}'
-                f'<form data-api="/api/review">{fields}<div class="row"><button class="primary">Save</button>{saved}</div></form>'
+                f'<form data-api="/api/today/review">{fields}<div class="row"><button class="primary">Save</button>{saved}</div></form>'
                 '</section>')
 
     # 7. Wins log
@@ -307,12 +295,12 @@ class Page:
         def item(w):
             body = esc(json.dumps({"id": w["id"]}))
             return (f'<li>{esc(w["text"])} <span class="muted">{short(reader.day(w["ts"]))}</span> '
-                    f'<button type="button" class="small" data-api="/api/win/delete" data-body="{body}">remove</button></li>')
+                    f'<button type="button" class="small" data-api="/api/today/win-delete" data-body="{body}">remove</button></li>')
         latest = "".join(item(w) for w in self.wins[:5])
         older = (f'<details><summary>{plural(len(self.wins) - 5, "older win")}</summary>'
                  f'<ul>{"".join(item(w) for w in self.wins[5:])}</ul></details>' if len(self.wins) > 5 else "")
         return (f'<section><h2>Wins</h2><ul>{latest}</ul>{older}'
-                '<form data-api="/api/win"><div class="row"><input type="text" name="text" maxlength="300" style="flex:1;width:auto" '
+                '<form data-api="/api/today/win"><div class="row"><input type="text" name="text" maxlength="300" style="flex:1;width:auto" '
                 'placeholder="A recruiter reply, an interview, a kind word about your background"><button>Add</button></div></form>'
                 '</section>')
 
@@ -333,11 +321,11 @@ class Page:
         skip = esc(json.dumps({"job_id": j["id"], "reason": reason, "text": ""}))
         more = f'<div class="sub">{len(ask) - 1} more after this one.</div>' if len(ask) > 1 else ""
         return (f'<section><h2>One question</h2><div>{self.link(j)} {what}</div>'
-                f'<form data-api="/api/lesson"><input type="hidden" name="job_id" value="{esc(j["id"])}">'
+                f'<form data-api="/api/today/lesson"><input type="hidden" name="job_id" value="{esc(j["id"])}">'
                 f'<input type="hidden" name="reason" value="{reason}">'
                 '<div class="row"><input type="text" name="text" maxlength="300" style="flex:1;width:auto" '
                 'placeholder="One line on what you learned"><button class="primary">Save</button>'
-                f'<button type="button" data-api="/api/lesson" data-body="{skip}">Nothing, move on</button></div></form>'
+                f'<button type="button" data-api="/api/today/lesson" data-body="{skip}">Nothing, move on</button></div></form>'
                 f'{more}</section>')
 
     def render(self):
@@ -353,22 +341,21 @@ class Page:
                 panels.append(self.review_panel())
             panels.append(self.wins_panel())
             if not self.show_review:
-                panels.append('<div class="sub"><a href="?all=1&amp;review=1">Weekly review</a></div>')
-        url = esc(self.cfg["tracker_url"])
+                panels.append('<div class="sub"><a href="/today?all=1&amp;review=1">Weekly review</a></div>')
         return f"""<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Job Search Today</title>
-<link rel="stylesheet" href="/static/dashboard.css">
-<script src="/static/dashboard.js" defer></script>
+<link rel="stylesheet" href="/today/today.css">
+<script src="/today/today.js" defer></script>
 </head>
 <body>
 <main>
 <header>
   <h1>Job Search Today</h1>
-  <nav class="nav"><a href="/" class="cur">Today</a><a href="{url}">Tracker</a><a href="{url}log">Log</a></nav>
+  <nav class="nav"><a href="/">Tracker</a><a href="/log">Log</a><a href="/today" class="cur">Today</a></nav>
 </header>
 <div id="err" class="note" hidden></div>
 {"".join(panels)}
@@ -378,144 +365,50 @@ class Page:
 """
 
 
-def private_ip(text):
+def page(cfg, query):
+    """The Today page for a parsed query string."""
+    return Page(cfg, query.get("all") == ["1"], query.get("review") == ["1"]).render()
+
+
+def asset(name):
+    """(bytes, content type) for /today/today.css or /today/today.js, else None."""
+    files = {"today.css": ("dashboard.css", "text/css"), "today.js": ("dashboard.js", "text/javascript")}
+    if name not in files:
+        return None
+    with open(os.path.join(STATIC, files[name][0]), "rb") as f:
+        return f.read(), files[name][1] + "; charset=utf-8"
+
+
+def save(cfg, action, data):
+    """Handle POST /api/today/<action>. Returns (HTTP status, JSON object)."""
+    if not isinstance(data, dict):
+        return 400, {"error": "expected a JSON object"}
+    today = now().date()
+    monday = (today - datetime.timedelta(days=today.weekday())).isoformat()
+    today = today.isoformat()
+    job = str(data.get("job_id") or "")
+    if action in ("resume", "lesson") and (
+            not JOB_ID.match(job) or job not in reader.Tracker(cfg["tracker_db"]).by_id):
+        return 400, {"error": "That application was not found in the tracker."}
     try:
-        ip = ipaddress.ip_address(text)
-    except ValueError:
-        return False
-    if getattr(ip, "ipv4_mapped", None):
-        ip = ip.ipv4_mapped
-    return ip.is_private or ip.is_loopback or ip.is_link_local
-
-
-def host_only(header):
-    """Host header without its port: 'host.example.local:8050' -> 'host.example.local', '[::1]:8050' -> '::1'."""
-    host = header.strip().lower()
-    if host.startswith("["):
-        return host[1:host.find("]")] if "]" in host else host
-    return host.rsplit(":", 1)[0] if host.count(":") == 1 else host
-
-
-class Handler(BaseHTTPRequestHandler):
-    server_version = "JobDashboard/1.0"
-    protocol_version = "HTTP/1.1"
-    cfg = None
-
-    def log_message(self, fmt, *args):
-        if self.command != "GET":
-            sys.stderr.write("%s %s\n" % (self.client_address[0], fmt % args))
-
-    def send(self, body, ctype, status=200, cache="no-store"):
-        if isinstance(body, str):
-            body = body.encode()
-        self.send_response(status)
-        self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", cache)
-        if status >= 400:
-            self.close_connection = True
-            self.send_header("Connection", "close")
-        self.end_headers()
-        self.wfile.write(body)
-
-    def send_json(self, obj, status=200):
-        self.send(json.dumps(obj), "application/json", status)
-
-    def allowed(self):
-        host = host_only(self.headers.get("Host") or "")
-        if private_ip(self.client_address[0]) and (host in HOSTNAMES or private_ip(host)):
-            return True
-        self.send_json({"error": "This dashboard only answers on the home network."}, 403)
-        return False
-
-    def body(self):
-        if (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() != "application/json":
-            self.send_json({"error": "Content-Type must be application/json"}, 415)
-            return None
-        try:
-            n = int(self.headers.get("Content-Length") or 0)
-        except ValueError:
-            n = -1
-        if n < 0 or n > MAX_BODY:
-            self.send_json({"error": "request too large"}, 413)
-            return None
-        try:
-            data = json.loads(self.rfile.read(n) or b"{}")
-        except ValueError:
-            data = None
-        if not isinstance(data, dict):
-            self.send_json({"error": "expected a JSON object"}, 400)
-            return None
-        return data
-
-    def do_GET(self):
-        if not self.allowed():
-            return
-        url = urlparse(self.path)
-        if url.path == "/":
-            try:
-                q = parse_qs(url.query)
-                page = Page(self.cfg, q.get("all") == ["1"], q.get("review") == ["1"]).render()
-            except Exception as e:    # e.g. the tracker database is missing
-                print(f"page failed: {e!r}", file=sys.stderr)
-                return self.send("<p>The dashboard could not read the tracker just now. "
-                                 "Try again in a moment.</p>", "text/html; charset=utf-8", 503)
-            self.send(page, "text/html; charset=utf-8")
-        elif url.path in ("/static/dashboard.css", "/static/dashboard.js"):
-            name = url.path.rsplit("/", 1)[1]
-            with open(os.path.join(STATIC, name), "rb") as f:
-                ctype = "text/css" if name.endswith(".css") else "text/javascript"
-                self.send(f.read(), ctype + "; charset=utf-8", cache="no-cache")
-        else:
-            self.send_json({"error": "not found"}, 404)
-
-    def do_POST(self):
-        if not self.allowed():
-            return
-        path = urlparse(self.path).path
-        data = self.body()
-        if data is None:
-            return
-        today = now().date()
-        monday = (today - datetime.timedelta(days=today.weekday())).isoformat()
-        today = today.isoformat()
-        job = str(data.get("job_id") or "")
-        if path in ("/api/resume", "/api/lesson") and (
-                not JOB_ID.match(job) or job not in reader.Tracker(self.cfg["tracker_db"]).by_id):
-            return self.send_json({"error": "That application was not found in the tracker."}, 400)
-        try:
-            with store.Store() as s:
-                if path == "/api/count":
-                    s.bump(today, data.get("kind"), data.get("delta"))
-                elif path == "/api/checkin":
-                    energy = str(data.get("energy") or "")
-                    s.save_checkin(today, int(energy) if energy.isdigit() else 0,
-                                   data.get("activity"), data.get("note"))
-                elif path == "/api/resume":
-                    s.tag_resume(job, data.get("version"))
-                elif path == "/api/lesson":
-                    s.save_lesson(job, data.get("reason"), data.get("text"))
-                elif path == "/api/review":
-                    s.save_review(monday, data.get("moved"), data.get("worked"), data.get("change"), data.get("proud"))
-                elif path == "/api/win":
-                    s.add_win(data.get("text"))
-                elif path == "/api/win/delete":
-                    s.set_win_deleted(int(data.get("id") or 0), True)
-                else:
-                    return self.send_json({"error": "not found"}, 404)
-        except ValueError as e:
-            return self.send_json({"error": str(e)}, 400)
-        self.send_json({"ok": True})
-
-
-def main():
-    Handler.cfg = store.load_config()
-    store.init_db()
-    server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
-    server.daemon_threads = True
-    print(f"job dashboard listening on port {PORT}", file=sys.stderr)
-    server.serve_forever()
-
-
-if __name__ == "__main__":
-    main()
+        with store.Store() as s:
+            if action == "count":
+                s.bump(today, data.get("kind"), data.get("delta"))
+            elif action == "checkin":
+                energy = str(data.get("energy") or "")
+                s.save_checkin(today, int(energy) if energy.isdigit() else 0, data.get("activity"), data.get("note"))
+            elif action == "resume":
+                s.tag_resume(job, data.get("version"))
+            elif action == "lesson":
+                s.save_lesson(job, data.get("reason"), data.get("text"))
+            elif action == "review":
+                s.save_review(monday, data.get("moved"), data.get("worked"), data.get("change"), data.get("proud"))
+            elif action == "win":
+                s.add_win(data.get("text"))
+            elif action == "win-delete":
+                s.set_win_deleted(int(data.get("id") or 0), True)
+            else:
+                return 404, {"error": "not found"}
+    except (TypeError, ValueError) as e:
+        return 400, {"error": str(e)}
+    return 200, {"ok": True}

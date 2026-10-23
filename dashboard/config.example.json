@@ -1,6 +1,5 @@
 {
   "tracker_db": "../data/tracker.db",
-  "tracker_url": "http://tracker.example.local/",
   "done_line": {"applications": 2, "networking": 1, "followups": 1},
   "light_days": ["Sat", "Sun"],
   "light_day_line": {"applications": 0, "networking": 0, "followups": 1},

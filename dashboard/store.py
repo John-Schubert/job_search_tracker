@@ -1,7 +1,7 @@
 """The dashboard's own data: check-ins, counters, wins, reviews, resume tags,
 lessons from closed applications, and the config file.
 
-Everything lives in data/ next to this file, which git ignores. Nothing here
+Everything lives in the tracker's data/dashboard/ folder, which git ignores. Nothing here
 touches the tracker's database.
 """
 import json
@@ -10,7 +10,9 @@ import sqlite3
 import time
 
 BASE = os.path.dirname(os.path.abspath(__file__))
-DATA = os.environ.get("DASHBOARD_DATA", os.path.join(BASE, "data"))
+# Inside the tracker's data/ folder: git-ignored, and the only place the
+# tracker service may write.
+DATA = os.environ.get("DASHBOARD_DATA", os.path.join(BASE, "..", "data", "dashboard"))
 DB = os.path.join(DATA, "dashboard.db")
 CONFIG = os.path.join(DATA, "config.json")
 CONFIG_EXAMPLE = os.path.join(BASE, "config.example.json")

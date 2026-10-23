@@ -17,6 +17,8 @@ so it only answers clients on private (home network) addresses.
   PUT    /api/log/<id>           create or update one log entry
   DELETE /api/log/<id>           remove a log entry (kept, restorable)
   POST   /api/log/<id>/restore   bring a removed log entry back
+  GET    /today                  the daily dashboard (dashboard/, see its docstring)
+  POST   /api/today/<action>     the dashboard's own saves; never touch the tracker
 """
 import ipaddress
 import json
@@ -53,6 +55,17 @@ HOSTNAMES = {"localhost", socket.gethostname().lower(), socket.gethostname().low
 HOSTNAMES |= {h.strip().lower() for h in os.environ.get("ALLOWED_HOSTS", "").split(",") if h.strip()}
 
 lock = threading.Lock()
+
+# The Today page. It reads tracker.db read-only and keeps its own data in
+# data/dashboard/. If it fails to load, the tracker and log still run.
+sys.path.insert(0, os.path.join(BASE, "dashboard"))
+try:
+    import dashboard
+    TODAY = dashboard.store.load_config()
+    TODAY["tracker_db"] = DB
+except Exception as e:
+    print(f"Today page unavailable: {e!r}", file=sys.stderr)
+    dashboard = None
 
 
 def connect():
@@ -253,6 +266,21 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def send_today(self, query):
+        try:
+            body = dashboard.page(TODAY, parse_qs(query)).encode()
+            status = 200
+        except Exception as e:      # the tracker pages keep working whatever happens here
+            print(f"Today page failed: {e!r}", file=sys.stderr)
+            body = b"<p>The Today page could not load just now. <a href='/'>Back to the tracker</a></p>"
+            status = 503
+        self.send_response(status)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
     def set_deleted(self, table, item_id, deleted):
         """Soft-delete or restore one row; returns True if it changed."""
         with lock:
@@ -273,6 +301,16 @@ class Handler(BaseHTTPRequestHandler):
             self.send_page("index.html")
         elif url.path in ("/log", "/log.html"):
             self.send_page("log.html")
+        elif url.path == "/today" and dashboard:
+            self.send_today(url.query)
+        elif url.path.startswith("/today/") and dashboard and dashboard.asset(url.path[7:]):
+            body, ctype = dashboard.asset(url.path[7:])
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-cache")
+            self.end_headers()
+            self.wfile.write(body)
         elif url.path == "/api/log":
             db = connect()
             out = []
@@ -391,6 +429,12 @@ class Handler(BaseHTTPRequestHandler):
         if not self.allowed():
             return
         path = urlparse(self.path).path
+        if path.startswith("/api/today/") and dashboard:
+            data = self.body()
+            if data is None:
+                return
+            status, out = dashboard.save(TODAY, path[len("/api/today/"):], data)
+            return self.send_json(out, status)
         nid = self.job_id(path, "/restore", kind="log")
         jid = self.job_id(path, "/restore")
         if nid or jid:
@@ -425,6 +469,8 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     init_db()
+    if dashboard:
+        dashboard.store.init_db()
     backup_daily()
     server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
     server.daemon_threads = True
