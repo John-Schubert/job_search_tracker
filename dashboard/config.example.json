@@ -1,0 +1,15 @@
+{
+  "tracker_db": "../data/tracker.db",
+  "tracker_url": "http://tracker.example.local/",
+  "done_line": {"applications": 2, "networking": 1, "followups": 1},
+  "light_days": ["Sat", "Sun"],
+  "light_day_line": {"applications": 0, "networking": 0, "followups": 1},
+  "hard_stop": "17:00",
+  "review_day": "Fri",
+  "volume_note_over": 3,
+  "stale_days": 14,
+  "ghosted_days": 30,
+  "upcoming_days": 3,
+  "resume_versions": ["v1", "v2", "v3"],
+  "activities": ["Radio / APRS station", "Drones", "3D printing", "Walking", "Cooking"]
+}

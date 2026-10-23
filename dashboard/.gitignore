@@ -1,0 +1,6 @@
+# The dashboard's own data (check-ins, wins, reviews, config) is personal.
+data/
+__pycache__/
+*.pyc
+*.db
+job-dashboard.service
